@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Gerador de Certidão de Uso e Ocupação do Solo (Editável)</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Papa Parse for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- Google Fonts: Inter for UI -->
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet"/>
+    <style>
+        /* Custom styles for the application */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #certificate-output {
+            font-family: 'Times New Roman', Times, serif; /* Font for the certificate */
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            position: relative; 
+            overflow: hidden;
+        }
+        /* Watermark for screen view */
+        #certificate-output::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image: url('https://raw.githubusercontent.com/Hadler-Stevanatto/CERTIDAO/main/fundo%20PMV.png');
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: contain;
+            opacity: 0.5;
+            z-index: 0;
+        }
+        .certificate-content p {
+            text-indent: 4rem;
+            line-height: 1.4; /* Adjusted line spacing */
+        }
+        
+        /* Style to indicate the editable area */
+        #print-body[contenteditable="true"] {
+            outline: 2px dashed #cbd5e1;
+            outline-offset: 8px;
+            border-radius: 4px;
+        }
+
+        /* Print-specific styles */
+        @media print {
+            @page {
+                size: A4;
+                margin: 1.5cm 1.5cm 2.5cm 1.5cm; /* Top, Right, BOTTOM, Left - Increased bottom margin for footer */
+                @bottom-center {
+                    content: "PAÇO MUNICIPAL - PALÁCIO INDEPENDÊNCIA | Rua Antônio Carlos, 301 - Centro | Valinhos - SP | CEP 13270-005\A Fone: (19) 3849.8000 | site: www.valinhos.sp.gov.br\A\A Página " counter(page) " de " counter(pages);
+                    white-space: pre;
+                    font-family: 'Times New Roman', Times, serif;
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { 
+                margin: 0; 
+                padding: 0; 
+                background-color: white !important; 
+                -webkit-print-color-adjust: exact; 
+                print-color-adjust: exact; 
+            }
+            .no-print { display: none !important; }
+
+            /* Fix for multi-page printing issue */
+            .container > .grid {
+                display: block !important;
+            }
+            
+            #certificate-output { 
+                display: block !important; 
+                box-shadow: none !important; 
+                border: none !important; 
+                font-size: 11pt !important;
+                width: 100% !important; 
+                color: black !important;
+            }
+            #certificate-output::before {
+                display: none; /* Disable screen watermark for printing */
+            }
+
+            /* --- Header Print Fixes --- */
+            #certificate-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            #certificate-table thead {
+                display: table-header-group; /* CRITICAL for repeating headers across pages */
+            }
+            #certificate-table thead td {
+                padding-bottom: 0.5rem !important; /* Reduced from 1rem */
+                color: black !important;
+            }
+            #print-header, #print-header * {
+                color: black !important;
+                text-align: center !important;
+            }
+            #print-header h2 {
+                font-size: 16pt !important;
+                font-weight: bold !important;
+            }
+             #print-header p {
+                font-size: 16pt !important;
+                font-weight: bold !important;
+            }
+            #print-header img {
+                display: block !important;
+                height: 60px !important;
+                margin: 0 auto !important;
+            }
+
+            /* --- Body Print Fixes --- */
+            #print-body { 
+                text-align: justify !important;
+            }
+            #print-body[contenteditable="true"] { 
+                outline: none !important; 
+            }
+            /* Allow inline styles from the editor to be applied on print */
+            #print-body p, #print-body div {
+                /* Inline styles for font-size and line-height will now take precedence */
+            }
+            .certificate-content p {
+                text-indent: 4rem !important;
+                 /* The initial line-height is set outside media query, inline styles will override */
+            }
+
+            /* --- Watermark for Print --- */
+            .print-watermark {
+                display: block !important;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-image: url('https://raw.githubusercontent.com/Hadler-Stevanatto/CERTIDAO/main/fundo%20PMV.png');
+                background-position: center;
+                background-repeat: no-repeat;
+                background-size: contain;
+                opacity: 0.5;
+                z-index: -1000;
+            }
+            /* Avoid breaking signature block across pages */
+            .signature-block, footer { page-break-inside: avoid !important; }
+        }
+        
+        /* Hide print-only elements from screen */
+        .print-watermark {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <!-- This div is used to display the watermark only when printing -->
+    <div class="print-watermark"></div>
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8 no-print">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-700">Gerador de Certidão (Editável)</h1>
+            <p class="text-gray-500 mt-2">Preencha o formulário para gerar. <strong class="text-blue-600">O texto da certidão pode ser editado diretamente.</strong></p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Form Section -->
+            <div class="bg-white p-6 rounded-lg shadow-md no-print">
+                <form class="space-y-4" id="certificate-form">
+                    <h2 class="text-2xl font-bold border-b pb-2 mb-4">Dados da Certidão</h2>
+                    
+                    <!-- Search, Certificate No, and Protocol -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700" for="inscricao-imobiliaria">Inscrição Imobiliária (IM)</label>
+                        <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" id="inscricao-imobiliaria" placeholder="Digite a IM e pressione Enter" type="text"/>
+                        <div class="text-sm h-5 mt-1 font-medium" id="search-status"></div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700" for="certidao-numero">Nº da Certidão</label>
+                            <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" id="certidao-numero" type="text" value="0"/>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700" for="protocolo-numero">Nº do Protocolo</label>
+                            <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" id="protocolo-numero" type="text" value="0"/>
+                        </div>
+                    </div>
+
+                    <!-- Requester Details -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700" for="requerente-nome">Nome do Requerente</label>
+                            <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" id="requerente-nome" type="text" value="0"/>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700" for="requerente-cpf-cnpj">CPF/CNPJ do Requerente</label>
+                            <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" id="requerente-cpf-cnpj" type="text" value="0"/>
+                        </div>
+                    </div>
+
+                    <!-- Property Details Section (populated by search) -->
+                    <div class="space-y-4 border-t pt-4 mt-4">
+                        <h3 class="text-lg font-semibold text-gray-600">Dados do Imóvel (Editável)</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="logradouro">Logradouro</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="logradouro" type="text"/>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="numero">Número</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="numero" type="text"/>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="lote">Lote</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="lote" type="text"/>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="quadra">Quadra</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="quadra" type="text"/>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="loteamento">Loteamento</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="loteamento" type="text"/>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="bairro">Bairro</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="bairro" type="text"/>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="matricula">Matrícula</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="matricula" type="text"/>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="zona-zc">Zona (ZC)</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="zona-zc" type="text"/>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700" for="desc-zona">Descrição da Zona</label>
+                            <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="desc-zona" type="text"/>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700" for="atividades-permitidas">Atividades Permitidas (Automático)</label>
+                            <input class="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm" id="atividades-permitidas" type="text" readonly/>
+                        </div>
+                    </div>
+
+                    <!-- Activity Details -->
+                    <div class="space-y-4 border-t pt-4 mt-4">
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-lg font-semibold text-gray-600">Dados da Atividade</h3>
+                            <button class="px-3 py-1 bg-green-500 text-white text-sm font-semibold rounded-lg shadow-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-opacity-75" id="add-cnae-button" type="button">+ Adicionar CNAE</button>
+                        </div>
+                        <div class="space-y-3" id="cnae-fields-container">
+                            <!-- CNAE fields will be dynamically inserted here -->
+                        </div>
+                    </div>
+
+                    <!-- Issuer Details -->
+                    <div class="space-y-4 border-t pt-4 mt-4">
+                        <h3 class="text-lg font-semibold text-gray-600">Dados do Emissor</h3>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700" for="emissor-nome">Nome do Emissor</label>
+                            <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="emissor-nome" type="text" value="Nome Nome Nome"/>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="emissor-cargo">Cargo</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="emissor-cargo" type="text" value="Cargo Cargo Cargo"/>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700" for="emissor-lotacao">Lotação</label>
+                                <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="emissor-lotacao" type="text" value="Divisão de Viabilidade e Vistorias - SF"/>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700" for="local-data">Local e Data</label>
+                            <input class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm" id="local-data" type="text"/>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="border-t pt-4 mt-4 flex justify-end space-x-3">
+                        <button class="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg shadow-md hover:bg-gray-600" id="reset-button" type="button">Limpar</button>
+                        <button class="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700" id="print-button" type="button">Imprimir Certidão</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Certificate Column -->
+            <div>
+                <!-- Editor Toolbar -->
+                <div id="editor-toolbar" class="bg-white p-2 rounded-lg shadow-md mb-4 no-print flex items-center flex-wrap gap-2">
+                    <h3 class="text-lg font-semibold text-gray-600 mr-2">Editor:</h3>
+                    
+                    <!-- Style Buttons -->
+                    <div class="flex items-center space-x-1 border-r pr-2 mr-1">
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="bold" title="Negrito">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg>
+                        </button>
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="italic" title="Itálico">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/></svg>
+                        </button>
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="underline" title="Sublinhado">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v6a6 6 0 0 0 12 0V4"/><line x1="4" x2="20" y1="20" y2="20"/></svg>
+                        </button>
+                    </div>
+                
+                    <!-- Font Size Buttons -->
+                    <div class="flex items-center space-x-1 border-r pr-2 mr-1">
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="increaseFontSize" title="Aumentar Fonte">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V8l4-4 4 4v12"/><path d="m4 14h8"/><path d="M16 11l3-3 3 3"/><path d="M19 8v8"/></svg>
+                        </button>
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="decreaseFontSize" title="Diminuir Fonte">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V8l4-4 4 4v12"/><path d="m4 14h8"/><path d="M16 14l3 3 3-3"/><path d="M19 17V9"/></svg>
+                        </button>
+                    </div>
+
+                    <!-- Line Height Buttons -->
+                    <div class="flex items-center space-x-1 border-r pr-2 mr-1">
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="increaseLineHeight" title="Aumentar Espaçamento">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 7 3-3 3 3"/><path d="m6 17 3 3 3 3"/><path d="M9 4v16"/><path d="M14 6h7"/><path d="M14 12h7"/><path d="M14 18h7"/></svg>
+                        </button>
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="decreaseLineHeight" title="Diminuir Espaçamento">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 7 3-3 3 3"/><path d="m6 17 3 3 3 3"/><path d="M9 4v16"/><path d="M14 8h7"/><path d="M14 16h7"/></svg>
+                        </button>
+                    </div>
+
+                    <!-- Justify Buttons -->
+                    <div class="flex items-center space-x-1">
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="justifyLeft" title="Alinhar à Esquerda">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="15" x2="3" y1="12" y2="12"/><line x1="17" x2="3" y1="18" y2="18"/></svg>
+                        </button>
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="justifyCenter" title="Centralizar">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="17" x2="7" y1="12" y2="12"/><line x1="19" x2="5" y1="18" y2="18"/></svg>
+                        </button>
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="justifyRight" title="Alinhar à Direita">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="21" x2="9" y1="12" y2="12"/><line x1="21" x2="7" y1="18" y2="18"/></svg>
+                        </button>
+                        <button class="toolbar-button p-2 rounded hover:bg-gray-200" data-command="justifyFull" title="Justificar">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="21" x2="3" y1="12" y2="12"/><line x1="21" x2="3" y1="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Certificate Display -->
+                <div id="certificate-output">
+                    <table id="certificate-table">
+                        <thead>
+                            <tr>
+                                <td>
+                                    <div id="print-header" class="text-center">
+                                        <img alt="Logo da Prefeitura de Valinhos" src="https://raw.githubusercontent.com/Hadler-Stevanatto/CERTIDAO/main/logo%20e%20PMV.png" style="height: 60px; margin: 0 auto;"/>
+                                        <h2 class="text-xl font-bold uppercase tracking-wider mt-4">Certidão de Uso e Ocupação do Solo</h2>
+                                        <p class="text-lg font-bold mt-2">N° <span id="certidao-numero-out">0</span> - <span id="certidao-sigla-out">SF/DRF/DVV</span></p>
+                                    </div>
+                                </td>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <div id="print-body" contenteditable="true">
+                                        <div class="relative z-10 print-body-content pt-4 px-8 pb-8 md:pt-6 md:px-12 md:pb-12 lg:pt-8 lg:px-16 lg:pb-16">
+                                            <main class="text-justify text-base leading-relaxed certificate-content flex-grow">
+                                                <p>
+                                                    A Divisão de Viabilidade e Vistorias do Departamento de Receitas e Fiscalização, da
+                                                    Secretaria da Fazenda, a pedido de <strong id="requerente-nome-out">0</strong>, inscrito(a) no CPF/CNPJ sob o nº <strong id="requerente-cpf-cnpj-out">0</strong>, conforme elementos do
+                                                    protocolo <strong id="protocolo-numero-out">0</strong>, CERTIFICA para os devidos fins que:
+                                                </p>
+                                                <p>
+                                                    O imóvel com inscrição imobiliária <strong id="im-out">...</strong>, 
+                                                    situado na Rua/Av. <strong id="logradouro-out">...</strong>, 
+                                                    Nº <strong id="numero-out">...</strong>, 
+                                                    Lote: <strong id="lote-out">...</strong>, 
+                                                    Quadra: <strong id="quadra-out">...</strong>, 
+                                                    Loteamento: <strong id="loteamento-out">...</strong>, 
+                                                    Bairro: <strong id="bairro-out">...</strong>, 
+                                                    Matrícula: <strong id="matricula-out">...</strong>, 
+                                                    está inserido na <strong>ZONA URBANA</strong> do Município, 
+                                                    integrando a <strong id="zona-zc-out">...</strong> - <strong id="desc-zona-out">...</strong>, 
+                                                    conforme parâmetros da Lei Municipal nº 6574 de 29 de dezembro de 2023.
+                                                </p>
+                                                <p>
+                                                    Para o zoneamento local são permitidas as atividades classificadas como <strong id="atividades-permitidas-out">...</strong>, conforme Anexo III da Lei Municipal nº 6574 de 29 de dezembro de 2023.
+                                                </p>
+                                                <div id="cnae-compatibility-paragraphs">
+                                                    <!-- CNAE paragraphs will be dynamically inserted here -->
+                                                </div>
+                                                <p>
+                                                    Sob os aspectos construtivos, ambientais, licenciamento e de liberação para instalação e
+                                                    funcionamento, deverão ser respeitadas as legislações vigentes no âmbito federal,
+                                                    estadual e municipal. A compatibilidade indicada é vinculada ao estabelecimento das
+                                                    atividades no imóvel indicado.
+                                                </p>
+                                            </main>
+                                            <footer class="text-right mt-4 mb-4">
+                                                <p id="local-data-out">Valinhos, 15 de agosto de 2025</p>
+                                            </footer>
+                                            <div class="text-left signature-block">
+                                                <p class="italic" id="emissor-nome-out">Victor Guilherme Montagnoli</p>
+                                                <p class="text-sm italic" id="emissor-cargo-out">Agente Administrativo II</p>
+                                                <p class="text-sm italic" id="emissor-lotacao-out">Divisão de Viabilidade e Vistorias - SF</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // --- DATABASE SETUP ---
+    let propertyDatabase = [];
+    let cnaeDatabase = [];
+    const propertyCsvUrl = 'https://raw.githubusercontent.com/Hadler-Stevanatto/CERTIDAO/main/imobiliario_6574.2023.csv';
+    const cnaeCsvUrl = 'https://raw.githubusercontent.com/Hadler-Stevanatto/CERTIDAO/main/CNAE_6574.2023.csv';
+
+    // Load both CSV files concurrently
+    Promise.all([
+        new Promise((resolve, reject) => Papa.parse(propertyCsvUrl, { download: true, header: true, delimiter: ";", skipEmptyLines: true, complete: resolve, error: reject })),
+        new Promise((resolve, reject) => Papa.parse(cnaeCsvUrl, { download: true, header: true, delimiter: ";", skipEmptyLines: true, complete: resolve, error: reject }))
+    ]).then(results => {
+        propertyDatabase = results[0].data;
+        cnaeDatabase = results[1].data;
+        console.log('Bases de dados carregadas.');
+    }).catch(err => {
+        console.error("Erro ao carregar arquivos CSV:", err);
+        document.getElementById('search-status').textContent = 'Falha ao carregar bases de dados.';
+    });
+
+    // --- DOM ELEMENT REFERENCES ---
+    const form = document.getElementById('certificate-form');
+    const cnaeFieldsContainer = document.getElementById('cnae-fields-container');
+    const searchStatusEl = document.getElementById('search-status');
+
+    // --- FORMATTING FUNCTIONS ---
+    const formatDocumentNumber = (doc) => {
+        const cleaned = (doc || '').replace(/\D/g, '');
+        if (cleaned.length === 11) return `${cleaned.substring(0, 3)}.***.***-${cleaned.substring(9, 11)}`;
+        if (cleaned.length === 14) return `${cleaned.substring(0, 2)}.***.***/${cleaned.substring(8, 12)}-${cleaned.substring(12, 14)}`;
+        return doc;
+    };
+    const formatCnae = (cnae) => {
+        let cleaned = (cnae || '').replace(/\D/g, '').padStart(7, '0');
+        if (cleaned.length !== 7) return cnae;
+        return `${cleaned.substring(0, 4)}-${cleaned.substring(4, 5)}/${cleaned.substring(5, 7)}`;
+    };
+    const mapIncomodidadeToClassification = (incomodidade) => {
+        const incomodidadeStr = (incomodidade || '').trim();
+        const map = {'0': 'uR', '1': 'nR1', '2': 'nR2', '3': 'nR3', '4': 'nR4', '5': 'necessário avaliação de comissão especial'};
+        return map[incomodidadeStr] || '';
+    };
+
+    // --- CORE UPDATE LOGIC (CORRIGIDO) ---
+    const safeUpdateText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.textContent = value;
+        }
+    };
+
+    const updateCertificate = () => {
+        // This function now safely updates specific elements by ID
+        safeUpdateText('certidao-numero-out', document.getElementById('certidao-numero').value);
+        safeUpdateText('requerente-nome-out', document.getElementById('requerente-nome').value);
+        safeUpdateText('requerente-cpf-cnpj-out', formatDocumentNumber(document.getElementById('requerente-cpf-cnpj').value));
+        safeUpdateText('protocolo-numero-out', document.getElementById('protocolo-numero').value);
+        
+        safeUpdateText('im-out', document.getElementById('inscricao-imobiliaria').value);
+        safeUpdateText('logradouro-out', document.getElementById('logradouro').value);
+        safeUpdateText('numero-out', document.getElementById('numero').value);
+        safeUpdateText('lote-out', document.getElementById('lote').value);
+        safeUpdateText('quadra-out', document.getElementById('quadra').value);
+        safeUpdateText('loteamento-out', document.getElementById('loteamento').value);
+        safeUpdateText('bairro-out', document.getElementById('bairro').value);
+        safeUpdateText('matricula-out', document.getElementById('matricula').value);
+        safeUpdateText('zona-zc-out', document.getElementById('zona-zc').value);
+        safeUpdateText('desc-zona-out', document.getElementById('desc-zona').value);
+        safeUpdateText('atividades-permitidas-out', document.getElementById('atividades-permitidas').value);
+
+        updateCnaeCompatibilityParagraphs();
+
+        safeUpdateText('local-data-out', document.getElementById('local-data').value);
+        safeUpdateText('emissor-nome-out', document.getElementById('emissor-nome').value);
+        safeUpdateText('emissor-cargo-out', document.getElementById('emissor-cargo').value);
+        safeUpdateText('emissor-lotacao-out', document.getElementById('emissor-lotacao').value);
+    };
+
+    const updateCnaeCompatibilityParagraphs = () => {
+        const container = document.getElementById('cnae-compatibility-paragraphs');
+        if (!container) return; // Exit safely if the container was deleted
+        
+        container.innerHTML = ''; // Clear and rebuild paragraphs
+        document.querySelectorAll('.cnae-entry').forEach(field => {
+            const cnaeInput = field.querySelector('.cnae-code-input');
+            const compatibilityInput = field.querySelector('.cnae-compatibility-input');
+            const rawCnae = (cnaeInput.value || '').replace(/\D/g, '');
+            if (!rawCnae) return;
+
+            const cnaeData = cnaeDatabase.find(row => row.CNAE && row.CNAE.trim() === rawCnae);
+            const formattedCnae = formatCnae(cnaeInput.value);
+            const cnaeDescription = cnaeData ? cnaeData.DESCRIÇÃO : 'Descrição não encontrada';
+            const compatibilityText = compatibilityInput.value || 'N/D';
+            const obsText = (cnaeData && cnaeData.OBS && cnaeData.OBS.trim()) ? ` <em>(${cnaeData.OBS.trim()})</em>` : '';
+            const incomodidadeText = (cnaeData && cnaeData.INCOMODIDADE) ? ` (${mapIncomodidadeToClassification(cnaeData.INCOMODIDADE)})` : '';
+            
+            const p = document.createElement('p');
+            p.innerHTML = `Para o uso pretendido CNAE <strong>${formattedCnae} - ${cnaeDescription}</strong>${incomodidadeText}${obsText}, a atividade é classificada como <strong>${compatibilityText}</strong> no zoneamento local.`;
+            container.appendChild(p);
+        });
+    };
+
+    const validateSingleCnae = (cnaeInput, compatibilityInput) => {
+        const imToFind = document.getElementById('inscricao-imobiliaria').value.trim();
+        const property = propertyDatabase.find(row => row.IM && row.IM.trim() === imToFind);
+        const cnaeValue = (cnaeInput.value || '').replace(/\D/g, '');
+        const cnaeData = cnaeDatabase.find(row => row.CNAE && row.CNAE.trim() === cnaeValue);
+
+        let result = "INCOMPATÍVEL"; // Default value
+        if (property && cnaeData) {
+            const incomodidadeValue = parseInt((cnaeData.INCOMODIDADE || '').trim(), 10);
+            
+            const allowedZonesForUR = [
+                'ZR1', 'MDO1', 'MDO2', '0_ZC1', '0_ZC1.5', '0_ZC2', '0_ZC3', 'ZEIS1', 
+                'ZEIS1_ZC2', 'ZEIS2', 'ZM', 'ZM_ZC1', 'ZM_ZC1.5', 'ZM_ZC2', 'ZM_ZC3', 
+                'ZRRM1', 'ZRRM1_ZC1', 'ZRRM1_ZC3', 'ZRRM1_ZC1.5', 'ZRRM1_ZC2', 'ZRRM2', 'ZRRM2_ZC1'
+            ];
+            const propertyZone = (property.ZONA_ZC || '').trim();
+
+            if (incomodidadeValue === 0 && !allowedZonesForUR.includes(propertyZone)) {
+                result = "INCOMPATÍVEL";
+            } else {
+                const grupoMap = { 'A0': 0, 'A1': 1, 'A2': 2, 'A3': 3, 'A4': 4, 'A5': 5 };
+                const grupoAtvValue = grupoMap[(property.GRUPO_ATV || '').trim()];
+
+                if (incomodidadeValue === 5) {
+                    result = "DEPENDENTE DE ANALISE";
+                } else if (!isNaN(incomodidadeValue) && incomodidadeValue <= grupoAtvValue) {
+                    result = "COMPATÍVEL";
+                }
+            }
+        }
+        compatibilityInput.value = result;
+        updateCertificate();
+    };
+
+    const findPropertyData = () => {
+        const imToFind = document.getElementById('inscricao-imobiliaria').value.trim();
+        const foundProperty = propertyDatabase.find(row => row.IM && row.IM.trim() === imToFind);
+
+        if (foundProperty) {
+            searchStatusEl.textContent = 'IM encontrada com sucesso!';
+            searchStatusEl.className = 'text-sm h-5 mt-1 font-medium text-green-600';
+            
+            document.getElementById('logradouro').value = foundProperty.LOGRADOURO || '';
+            document.getElementById('numero').value = foundProperty.NUMERO || '';
+            document.getElementById('lote').value = foundProperty.LOTE || '';
+            document.getElementById('quadra').value = foundProperty.QUADRA || '';
+            document.getElementById('loteamento').value = foundProperty.LOTEAMENTO || '';
+            document.getElementById('bairro').value = foundProperty.BAIRRO || '';
+            document.getElementById('matricula').value = foundProperty.MATRICULA || '';
+            document.getElementById('zona-zc').value = foundProperty.ZONA_ZC || '';
+            document.getElementById('desc-zona').value = foundProperty.DESC_ZONA || '';
+            
+            const propertyZone = (foundProperty.ZONA_ZC || '').trim();
+            const allowedZonesForUR = [
+                'ZR1', 'MDO1', 'MDO2', '0_ZC1', '0_ZC1.5', '0_ZC2', '0_ZC3', 'ZEIS1', 
+                'ZEIS1_ZC2', 'ZEIS2', 'ZM', 'ZM_ZC1', 'ZM_ZC1.5', 'ZM_ZC2', 'ZM_ZC3', 
+                'ZRRM1', 'ZRRM1_ZC1', 'ZRRM1_ZC3', 'ZRRM1_ZC1.5', 'ZRRM1_ZC2', 'ZRRM2', 'ZRRM2_ZC1'
+            ];
+            const isUrAllowed = allowedZonesForUR.includes(propertyZone);
+            const grupoAtv = (foundProperty.GRUPO_ATV || '').trim();
+
+            let activities = [];
+            if (isUrAllowed && ['A0', 'A1', 'A2', 'A3', 'A4'].includes(grupoAtv)) {
+                activities.push('uR');
+            }
+            if (['A1', 'A2', 'A3', 'A4'].includes(grupoAtv)) {
+                activities.push('nR1');
+            }
+            if (['A2', 'A3', 'A4'].includes(grupoAtv)) {
+                activities.push('nR2');
+            }
+            if (['A3', 'A4'].includes(grupoAtv)) {
+                activities.push('nR3');
+            }
+            if (['A4'].includes(grupoAtv)) {
+                activities.push('nR4');
+            }
+            
+            let permittedText = 'Grupo não encontrado';
+            if (activities.length > 0) {
+                 if (activities.length === 1) {
+                    permittedText = activities[0];
+                } else {
+                    const last = activities.pop();
+                    permittedText = activities.join(', ') + ' e ' + last;
+                }
+            } else if (grupoAtv) {
+                permittedText = 'Nenhuma atividade permitida para esta zona';
+            }
+            
+            document.getElementById('atividades-permitidas').value = permittedText;
+
+        } else {
+            searchStatusEl.textContent = 'IM não encontrada.';
+            searchStatusEl.className = 'text-sm h-5 mt-1 font-medium text-red-600';
+            ['logradouro', 'numero', 'lote', 'quadra', 'loteamento', 'bairro', 'matricula', 'zona-zc', 'desc-zona', 'atividades-permitidas'].forEach(id => document.getElementById(id).value = '');
+        }
+        
+        document.querySelectorAll('.cnae-entry').forEach(field => {
+            validateSingleCnae(field.querySelector('.cnae-code-input'), field.querySelector('.cnae-compatibility-input'));
+        });
+        updateCertificate();
+    };
+    
+    const addCnaeField = () => {
+        const newCnaeEntry = document.createElement('div');
+        newCnaeEntry.className = 'cnae-entry grid grid-cols-1 sm:grid-cols-3 gap-4 items-end';
+        newCnaeEntry.innerHTML = `
+            <div class="sm:col-span-2">
+                <label class="block text-sm font-medium text-gray-700">CNAE (somente números)</label>
+                <input type="text" class="cnae-code-input mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm">
+            </div>
+            <div class="flex space-x-2">
+                <div class="flex-grow">
+                    <label class="block text-sm font-medium text-gray-700">Compatibilidade</label>
+                    <input type="text" class="cnae-compatibility-input mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md shadow-sm" readonly>
+                </div>
+                <button type="button" class="remove-cnae-button self-end px-3 py-2 bg-red-500 text-white font-semibold rounded-lg shadow-md hover:bg-red-600">-</button>
+            </div>`;
+        cnaeFieldsContainer.appendChild(newCnaeEntry);
+    };
+
+    // --- EVENT LISTENERS ---
+    document.getElementById('inscricao-imobiliaria').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault(); 
+            findPropertyData();
+        }
+    });
+    
+    document.getElementById('add-cnae-button').addEventListener('click', addCnaeField);
+
+    cnaeFieldsContainer.addEventListener('input', (e) => {
+        if (e.target.classList.contains('cnae-code-input')) {
+            const entry = e.target.closest('.cnae-entry');
+            validateSingleCnae(e.target, entry.querySelector('.cnae-compatibility-input'));
+        }
+    });
+    
+    cnaeFieldsContainer.addEventListener('click', (e) => {
+        if (e.target.classList.contains('remove-cnae-button')) {
+            e.target.closest('.cnae-entry').remove();
+            updateCertificate();
+        }
+    });
+    
+    form.addEventListener('input', updateCertificate);
+
+    document.getElementById('print-button').addEventListener('click', () => window.print());
+    
+    document.getElementById('reset-button').addEventListener('click', () => {
+        form.reset();
+        cnaeFieldsContainer.innerHTML = '';
+        addCnaeField();
+        searchStatusEl.textContent = '';
+        setCurrentDate();
+        updateCertificate();
+    });
+
+    // --- EDITOR TOOLBAR LOGIC ---
+    const editorToolbar = document.getElementById('editor-toolbar');
+    const editableArea = document.getElementById('print-body');
+
+    if (editorToolbar && editableArea) {
+        const getSelectedBlockElements = () => {
+            const selection = window.getSelection();
+            if (!selection.rangeCount) return [];
+            
+            const range = selection.getRangeAt(0);
+            const selectedBlocks = [];
+
+            // If the selection is just a cursor (collapsed), find its parent block element.
+            if (range.collapsed) {
+                let element = selection.anchorNode;
+                if (element.nodeType === 3) { // Text node
+                    element = element.parentElement;
+                }
+                const blockElement = element.closest('p, div, h1, h2, h3, h4, h5, h6, li');
+                if (blockElement && editableArea.contains(blockElement)) {
+                    selectedBlocks.push(blockElement);
+                }
+                return selectedBlocks;
+            }
+
+            // For a ranged selection, find all block elements that intersect with it.
+            const allBlocks = editableArea.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li');
+            for (const block of allBlocks) {
+                // The 'true' argument checks for partial intersection.
+                if (selection.containsNode(block, true)) {
+                    selectedBlocks.push(block);
+                }
+            }
+            return selectedBlocks;
+        };
+
+        const adjustFontSize = (direction) => {
+            const elements = getSelectedBlockElements();
+            elements.forEach(blockElement => {
+                const computedStyle = window.getComputedStyle(blockElement);
+                let currentSize = parseFloat(computedStyle.fontSize);
+                
+                if (direction === 'increase') {
+                    currentSize += 1;
+                } else if (direction === 'decrease' && currentSize > 8) { // Prevent making text too small
+                    currentSize -= 1;
+                }
+                
+                blockElement.style.fontSize = `${currentSize}px`;
+            });
+        };
+
+        const adjustLineHeight = (direction) => {
+            const elements = getSelectedBlockElements();
+            elements.forEach(blockElement => {
+                const computedStyle = window.getComputedStyle(blockElement);
+                let currentLineHeight = parseFloat(blockElement.style.lineHeight);
+                
+                if (isNaN(currentLineHeight)) {
+                    const computedPx = parseFloat(computedStyle.lineHeight);
+                    const fontSizePx = parseFloat(computedStyle.fontSize);
+                    currentLineHeight = (fontSizePx > 0) ? (computedPx / fontSizePx) : 1.4; // Default fallback
+                }
+                
+                if (direction === 'increase') {
+                    currentLineHeight += 0.1;
+                } else if (direction === 'decrease' && currentLineHeight > 0.5) { // Prevent collapsing lines
+                    currentLineHeight -= 0.1;
+                }
+                
+                blockElement.style.lineHeight = currentLineHeight.toFixed(2);
+            });
+        };
+
+        const updateToolbarState = () => {
+            document.querySelectorAll('.toolbar-button').forEach(button => {
+                const command = button.dataset.command;
+                if (command.startsWith('justify') || ['bold', 'italic', 'underline'].includes(command)) {
+                    try {
+                        if (document.queryCommandState(command)) {
+                            button.classList.add('bg-blue-100', 'text-blue-700');
+                        } else {
+                            button.classList.remove('bg-blue-100', 'text-blue-700');
+                        }
+                    } catch (e) {
+                        // Ignore errors that can happen in some browsers.
+                    }
+                }
+            });
+        };
+
+        editorToolbar.addEventListener('mousedown', (e) => {
+            const button = e.target.closest('.toolbar-button');
+            if (button) {
+                e.preventDefault(); // Prevent losing text selection
+                const command = button.dataset.command;
+                
+                if (command === 'increaseFontSize') adjustFontSize('increase');
+                else if (command === 'decreaseFontSize') adjustFontSize('decrease');
+                else if (command === 'increaseLineHeight') adjustLineHeight('increase');
+                else if (command === 'decreaseLineHeight') adjustLineHeight('decrease');
+                else document.execCommand(command, false, null);
+                
+                updateToolbarState();
+            }
+        });
+
+        document.addEventListener('selectionchange', () => {
+            if (document.activeElement === editableArea) {
+                updateToolbarState();
+            }
+        });
+        
+        editableArea.addEventListener('focus', updateToolbarState);
+    } else {
+        console.error("A barra de ferramentas do editor ou a área editável não foram encontradas. A funcionalidade da barra de ferramentas será desativada.");
+    }
+
+    // --- INITIAL SETUP ---
+    const setCurrentDate = () => {
+        const today = new Date();
+        const day = today.getDate();
+        const year = today.getFullYear();
+        const monthNames = [
+            'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+            'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
+        ];
+        const monthName = monthNames[today.getMonth()];
+        
+        const formattedDate = `Valinhos, ${day} de ${monthName} de ${year}`;
+        document.getElementById('local-data').value = formattedDate;
+    };
+
+    addCnaeField(); 
+    setCurrentDate(); 
+    updateCertificate(); 
+});
+</script>
+</body>
+</html>
+
